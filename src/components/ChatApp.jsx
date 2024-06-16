@@ -1,9 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { getAuth, signOut, onAuthStateChanged } from "firebase/auth";
+import { getAuth, signOut } from "firebase/auth";
 import ContactUs from './ContactUs';
 import axios from 'axios';
-import { serverTimestamp, collection, doc, getDoc, query, getDocs, addDoc, deleteDoc, updateDoc, arrayUnion, setDoc, orderBy, onSnapshot } from 'firebase/firestore';
-import { app, firestore } from '../firebase'; // Ensure proper import paths
+import { collection, doc, getDoc, getDocs, deleteDoc, updateDoc, arrayUnion, setDoc } from 'firebase/firestore';
+import { firestore } from '../firebase'; // Ensure proper import paths
 
 const examples = [
   "How to manage stress and anxiety effectively?",
@@ -16,106 +16,193 @@ const examples = [
 
 const Chat = ({ currentUserUID }) => {
   const [chat, setChat] = useState([]);
-  const [messages, setMessages] = useState([]);
+  const [messagess, setMessages] = useState([]);
   const [chatHistory, setChatHistory] = useState([]);
   const [title, setTitle] = useState('');
   const [input, setInput] = useState('');
   const [isPopupVisible, setIsPopupVisible] = useState(false);
   const [isContactUsVisible, setIsContactUsVisible] = useState(false);
   const [conversationStarted, setConversationStarted] = useState(false);
+  const [selectedDate, setSelectedDate] = useState(null);
 
-  // Fetch chat history
   const getChat = async () => {
     if (!currentUserUID) return;
 
     try {
-        const userMessagesRef = collection(firestore, `chats/${currentUserUID}/messages`);
+      const userMessagesRef = collection(firestore, `chats/${currentUserUID}/messages`);
 
-        // Get all documents in the 'messages' collection
-        const querySnapshot = await getDocs(userMessagesRef);
+      // Get all documents in the 'messages' collection
+      const querySnapshot = await getDocs(userMessagesRef);
 
-        let allMessages = [];
+      let allMessagesByDate = {};
 
-        querySnapshot.forEach((doc) => {
-            const conversationData = doc.data();
-            if (conversationData && conversationData.messages) {
-                allMessages = [...allMessages, ...conversationData.messages];
+      querySnapshot.forEach((doc) => {
+        const conversationData = doc.data();
+        if (conversationData && conversationData.messages) {
+          conversationData.messages.forEach(message => {
+            const dateKey = message.timestamp.split('T')[0]; // Extract the date in YYYY-MM-DD format
+            if (!allMessagesByDate[dateKey]) {
+              allMessagesByDate[dateKey] = [];
             }
-        });
-        
-        // Sort messages by timestamp
-        allMessages.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
-        console.log(allMessages)
+            allMessagesByDate[dateKey].push(message);
+          });
+        }
+      });
 
-        setChatHistory(allMessages);
-        return allMessages;
+      // Sort messages within each date
+      for (const date in allMessagesByDate) {
+        allMessagesByDate[date].sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+      }
+
+      const sortedDates = Object.keys(allMessagesByDate).sort((a, b) => new Date(b) - new Date(a));
+
+      let sortedChatHistory = {};
+      sortedDates.forEach(date => {
+        sortedChatHistory[date] = allMessagesByDate[date];
+      });
+
+      setChatHistory(sortedChatHistory);
+      return allMessagesByDate;
     } catch (error) {
-        console.error('Error getting chat:', error);
-        return [];
+      console.error('Error getting chat:', error);
+      return {};
     }
-};
-
-
-  
-  
-  
+  };
 
   // Load chat history on component mount or when currentUserUID changes
   useEffect(() => {
-    getChat();
+    
+
+    // Select Chat From history so i can check our previous interaction with bot
+    const fetchChatHistory = async () => {
+      try {
+        // console.log('Fetching chat history...');
+        const userMessagesRef = collection(firestore, `chats/${currentUserUID}/messages`);
+        const chatSnapshot = await getDocs(userMessagesRef);
+        const chatData = chatSnapshot.docs.map(doc => ({
+          date: doc.id,
+          messages: doc.data().messages,
+        }));
+        // console.log('Fetched chat data:', chatData);
+        setChatHistory(chatData);
+      
+      } catch (error) {
+        // console.error('Error fetching chat history:', error);
+        setChatHistory([]);
+      }
+    };
+
+    getChat()
+    fetchChatHistory();
+    
   }, [currentUserUID]);
+
+
+  const getDayOfWeek = (dateString) => {
+    const date = new Date(dateString);
+    return date.toLocaleDateString('en-US', { month: 'long', day: 'numeric' });
+  };
+
+  // Delete Chat
+  const handleDeleteChat = async (date) => {
+    try {
+      const userMessagesRef = collection(firestore, `chats/${currentUserUID}/messages`);
+      const conversationDocRef = doc(userMessagesRef, date);
+
+      // Remove the document from Firestore
+      await deleteDoc(conversationDocRef);
+    setConversationStarted(false);
+
+
+      // Update the state to remove the messages for the specified date
+      setChatHistory((prevChatHistory) => {
+        if (!Array.isArray(prevChatHistory)) return [];
+        return prevChatHistory.filter(chat => chat.date !== date);
+      });
+
+      console.log(`Deleted chat for date: ${date}`);
+      setMessages([])
+    } catch (error) {
+      console.error('Error deleting chat:', error);
+    }
+  };
+
+
 
   // Handle sending a new message
   const handleSend = async () => {
     if (input.trim() === '') return;
     setConversationStarted(true);
-    const userMessage = { text: input, timestamp: new Date().toISOString() };
+
+    const userMessage = { text: input, timestamp: new Date().toISOString(), sender: 'user' };
     setMessages((prevChat) => [...prevChat, userMessage]);
     setInput('');
 
-
     try {
-        const response = await axios.get(
-            `https://fj5pdfxsqg.execute-api.eu-north-1.amazonaws.com/llama2?query=${encodeURIComponent(input)}`
-        );
-
-        const botReply = response.data.replace(input, '').trim();
-        const botMessage = { text: botReply, timestamp: new Date().toISOString() };
-        setMessages((prevChat) => [...prevChat, botMessage]);
-
-        // Set up Firestore references
-        const today = new Date();
-        const dateKey = today.toISOString().split('T')[0]; // Get YYYY-MM-DD format
-        const userMessagesRef = collection(firestore, `chats/${currentUserUID}/messages`);
-
-        // Check if the conversation document already exists
-        const conversationDocRef = doc(userMessagesRef, dateKey);
-        const conversationDocSnapshot = await getDoc(conversationDocRef);
-
-        if (conversationDocSnapshot.exists()) {
-            // Conversation document exists, update it with new messages
-            await updateDoc(conversationDocRef, {
-                messages: arrayUnion(userMessage, botMessage)
-            });
-        } else {
-            // Conversation document doesn't exist, create it with initial messages
-            await setDoc(conversationDocRef, {
-                messages: [userMessage, botMessage]
-              });
-              
+      const response = await axios.post(
+        import.meta.env.VITE_API_LINK,
+        {
+          model: import.meta.env.VITE_MODEL_NAME,
+          messages: [
+            ...messagess.map(msg => ({ role: msg.sender === 'user' ? 'user' : 'assistant', content: msg.text })),
+            { role: 'user', content: "Hello" },
+            { role: 'assistant', content: "Hi! How are you feeling today?" },
+            { role: 'user', content: "You are a Mental health Therapist you are going to provide therapy to the patients who are struglling with depression, anxiety, sucidial thoughts, PTSD, bullying" },
+            { role: 'assistant', content: "Absolutely, I'm here to help." },
+            { role: 'user', content: "You are a helpful, empathetic, and supportive assistant specializing in mental health support. You provide information, resources, and a listening ear to those seeking help. Your responses are compassionate, non-judgmental, and focused on promoting well-being. You understand the importance of confidentiality and safety, and you always encourage users to seek professional help when needed." },
+            { role: 'assistant', content: "Of course. How can I support you today?" },
+            { role: 'user', content: input }
+          ],
+          max_tokens: 512,
+          temperature: 0.2,
+        },
+        {
+          headers: {
+            'Authorization': `Bearer ${import.meta.env.VITE_AWS_KEY}`,
+            'Content-Type': 'application/json',
+          },
         }
+      );
 
-        console.log('Message sent successfully!');
+      const botReply = response.data.choices[0].message.content.trim();
+      const botMessage = { text: botReply, timestamp: new Date().toISOString(), sender: 'assistant' };
+      const newMessages = [userMessage, botMessage];
+
+      setMessages((prevChat) => [...prevChat, botMessage]);
+
+      // Set up Firestore references
+      const today = new Date();
+      const dateKey = today.toISOString().split('T')[0]; // Get YYYY-MM-DD format
+      const userMessagesRef = collection(firestore, `chats/${currentUserUID}/messages`);
+
+      // Check if the conversation document already exists
+      const conversationDocRef = doc(userMessagesRef, dateKey);
+      const conversationDocSnapshot = await getDoc(conversationDocRef);
+
+      if (conversationDocSnapshot.exists()) {
+        // Conversation document exists, update it with new messages
+        await updateDoc(conversationDocRef, {
+          messages: arrayUnion(...newMessages)
+        });
+      } else {
+        // Conversation document doesn't exist, create it with initial messages
+        await setDoc(conversationDocRef, {
+          messages: newMessages
+        });
+      }
+
+      console.log('Message sent successfully!');
     } catch (error) {
-        console.error('Error sending message:', error);
+      console.error('Error sending message:', error);
     }
+  };
 
-};
-  
+
 
   const handleNewChat = () => {
+    setConversationStarted(false);
     setMessages([]);
-    // setTitle('');
+
   };
 
   const togglePopup = () => {
@@ -124,6 +211,16 @@ const Chat = ({ currentUserUID }) => {
 
   const toggleContactUs = () => {
     setIsContactUsVisible(!isContactUsVisible);
+  };
+  // get date from specific click
+  const handleDateClick = (date) => {
+    setConversationStarted(true);
+    setSelectedDate(date);
+    
+    // Find the object in chatHistory with the matching date
+    const chatHistoryItem = chatHistory.find(item => item.date === date);
+    const selectedMessages = chatHistoryItem ? chatHistoryItem.messages : [];
+    setMessages(selectedMessages);
   };
 
   const handleLogout = () => {
@@ -146,37 +243,61 @@ const Chat = ({ currentUserUID }) => {
         <div className='p-4'>
 
         </div>
-        <div className='h-[80%] overflow-y-auto shadow-lg hide-scroll-bar mb-4'>
-          {chatHistory.map((item, index) => (
-            <div key={index} className=' py-3 text-center rounded mt-4 text-lg font-light flex items-center px-8 hover:bg-slate-600 cursor-pointer'>
-              <span className='mr-4'>
-                <svg
-                  xmlns='http://www.w3.org/2000/svg'
-                  className='icon icon-tabler icon-tabler-message'
-                  width='24'
-                  height='24'
-                  viewBox='0 0 24 24'
-                  strokeWidth='2'
-                  stroke='currentColor'
-                  fill='none'
-                  strokeLinecap='round'
-                  strokeLinejoin='round'
-                >
-                  <path stroke='none' d='M0 0h24v24H0z' fill='none'></path>
-                  <path d='M8 9h8'></path>
-                  <path d='M8 13h6'></path>
-                  <path d='M18 4a3 3 0 0 1 3 3v8a3 3 0 0 1 -3 3h-5l-5 3v-3h-2a3 3 0 0 1 -3 -3v-8a3 3 0 0 1 3 -3h12z'></path>
-                </svg>
-              </span>
-              <span className='text-left mr-8 text-xs inline-block float-left truncate'>{item.text?.slice(0, 8)}</span>
-              <img className='h-5 mr-3 inline-block float-right' src="src/img/icons8-delete-48.png" alt="deleteIcon" />
-            </div>
-          ))}
+        <div className='h-[80%] overflow-y-auto shadow-lg hide-scroll-bar mb-4' >
+          {Array.isArray(chatHistory) && chatHistory.length > 0 ? (
+            chatHistory.map(({ date }, index) => (
+              <div
+                key={index}
+                onClick={() => handleDateClick(date)}
+                className='py-3 text-center rounded mt-4 text-lg font-light flex items-center px-8 hover:bg-slate-600 cursor-pointer'
+              >
+                <span className='mr-4'>
+                  <svg
+                    xmlns='http://www.w3.org/2000/svg'
+                    className='icon icon-tabler icon-tabler-message'
+                    width='24'
+                    height='24'
+                    viewBox='0 0 24 24'
+                    strokeWidth='2'
+                    stroke='currentColor'
+                    fill='none'
+                    strokeLinecap='round'
+                    strokeLinejoin='round'
+                  >
+                    <path stroke='none' d='M0 0h24v24H0z' fill='none'></path>
+                    <path d='M8 9h8'></path>
+                    <path d='M8 13h6'></path>
+                    <path d='M18 4a3 3 0 0 1 3 3v8a3 3 0 0 1 -3 3h-5l-5 3v-3h-2a3 3 0 0 1 -3 -3v-8a3 3 0 0 1 3 -3h12z'></path>
+                    
+                  </svg>
+                </span>
+                <span className='text-left mr-0 text-m inline-block float-left truncate'>
+                  {getDayOfWeek(date)}
+                </span>
+                <img
+                  className='h-5 ml-9 inline-block float-right'
+                  src="src/img/icons8-delete-48.png"
+                  alt="deleteIcon"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleDeleteChat(date);
+                  }}
+                />
+              </div>
+            ))
+          ) : (
+            <div className="text-center py-3">No chat history available</div>
+          )}
         </div>
+
+
         <div className='h-[20%] border-t flex flex-col items-center justify-between '>
-          <button className='bg-blue-500 text-white px-4 py-2 rounded mb-4' onClick={handleLogout}>
+          <div className='py-3 text-center rounded text-lg font-light flex items-center px-8 hover:bg-slate-600 cursor-pointer mt-2' onClick={handleLogout}>
+            <span className='mr-4'>
+              <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="icon icon-tabler icons-tabler-outline icon-tabler-logout"><path stroke="none" d="M0 0h24v24H0z" fill="none" /><path d="M14 8v-2a2 2 0 0 0 -2 -2h-7a2 2 0 0 0 -2 2v12a2 2 0 0 0 2 2h7a2 2 0 0 0 2 -2v-2" /><path d="M9 12h12l-3 -3" /><path d="M18 15l3 -3" /></svg>
+            </span>
             Logout
-          </button>
+          </div>
           <div className='py-3 text-center rounded text-lg font-light flex items-center px-8 hover:bg-slate-600 cursor-pointer' onClick={toggleContactUs}>
             <span className='mr-4'>
               <svg
@@ -201,32 +322,35 @@ const Chat = ({ currentUserUID }) => {
         </div>
       </div>
 
-      {isPopupVisible && (
-        <div className='fixed inset-0 flex items-center justify-center bg-black bg-opacity-50'>
-          <div className='bg-white p-6 rounded-lg shadow-lg' style={{ width: '250px', height: '200px', background: 'white' }}>
-            <div className='text-xl font-bold mb-4'>Settings</div>
-            <div >
-              <button onClick={handleLogout}>
-                Logout
-              </button>
-            </div>
-            <div className='flex justify-center mt-4'>
-              <button className='mt-4 px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-700' onClick={togglePopup}>
-                Close
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+
 
       {isContactUsVisible && <ContactUs toggleContactUs={toggleContactUs} />}
 
       <div className='w-[80%] h-screen flex flex-col justify-between'>
-        <div className='flex-grow overflow-auto p-8'>
-          {messages.map((message, index) => (
-            <div key={index} className={`w-[60%] mx-auto p-6 text-white flex ${message.sender === 'botMessage' ? 'bg-slate-900 rounded' : 'bg-slate-700 rounded'}`}>
-              <span className='mr-8 p-2 text-white rounded-full'>
-                {message.sender === 'userMessage' ? (
+        <div className='flex-grow overflow-auto p-4'>
+          {!conversationStarted ? (
+            <div className='h-[80%] flex flex-col justify-center items-center text-white'>
+              <div className='text-4xl font-bold mb-8'>Virtual Psychiatrist</div>
+              <div className='flex flex-wrap justify-around max-w-[900px]'>
+                {examples.map((item, index) => (
+                  <div
+                    key={index}
+                    className='text-lg font-light mt-4 p-4 border rounded cursor-pointer min-w-[400px] hover:bg-slate-800'
+                    onClick={() => setInput(item)}
+                  >
+                    {item}
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : (
+            messagess.map((message, index) => (
+            <div
+              key={index}
+              className={`w-[60%] mx-auto mb-4 p-6 text-white flex items-start ${message.sender === 'bot' ? 'bg-slate-900 rounded' : 'bg-slate-800 rounded'}`}
+            >
+              <span className='mr-4 p-2 text-white rounded-full'>
+                {message.sender === 'user' ? (
                   <svg
                     xmlns='http://www.w3.org/2000/svg'
                     className='icon icon-tabler icon-tabler-user-bolt'
@@ -271,19 +395,19 @@ const Chat = ({ currentUserUID }) => {
                 {message.text}
               </div>
             </div>
-          ))}
+          )))}
         </div>
-
+        
         <div className='h-[20%] p-8 bg-[#050509]'>
           <div className='w-full flex justify-center relative'>
             <input
               type='text'
               onChange={(e) => setInput(e.target.value)}
               value={input}
-              className='w-[60%] rounded-lg p-4 pr-16 bg-slate-800 text-white'
+              className='w-[70%] rounded-lg p-4 pr-16 bg-slate-800 text-white'
               placeholder='Type your message here...'
             />
-            <span className='absolute right-[20%] top-4 cursor-pointer flex' onClick={handleSend}>
+            <span className='absolute right-[16.5%] top-4 cursor-pointer flex' onClick={handleSend}>
               <svg
                 xmlns='http://www.w3.org/2000/svg'
                 className='icon icon-tabler icon-tabler-send'
