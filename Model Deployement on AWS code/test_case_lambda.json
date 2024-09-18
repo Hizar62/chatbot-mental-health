@@ -1,0 +1,8 @@
+{
+  "httpMethod": "Get",
+  "path": "/example",
+  "queryStringParameters": {
+    "query": "how to deal with loneliness??",
+    "param2": "value2"
+  }
+}
