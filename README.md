@@ -9,13 +9,10 @@
 ## Table of Contents
 1. [Introduction](#introduction)
 2. [Technologies Used](#technologies-used)
-3. [Project Architecture](#project-architecture)
-4. [Features Implemented](#features-implemented)
-5. [Challenges and Solutions](#challenges-and-solutions)
-6. [Testing and Debugging](#testing-and-debugging)
-7. [Future Enhancements](#future-enhancements)
-8. [Conclusion](#conclusion)
-9. [References](#references)
+3. [Features Implemented](#features-implemented)
+4. [Challenges and Solutions](#challenges-and-solutions)
+5. [Future Enhancements](#future-enhancements)
+6. [Conclusion](#conclusion)
 
 ## Introduction
 
