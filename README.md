@@ -77,3 +77,12 @@ Throughout this project, significant challenges were encountered, particularly i
 
 This project not only highlighted the technical aspects of AI and web development but also emphasized the importance of mental health awareness. Moving forward, there is potential for further enhancements, such as adding voice-based interactions and expanding the chatbot's capabilities to better serve users..
 
+## Demo
+
+<img src="asset/1.png" alt="Project Screenshot" title="Screenshot of the project" >
+<img src="asset/2.png" alt="Project Screenshot" title="Screenshot of the project">
+<img src="asset/3.png" alt="Project Screenshot" title="Screenshot of the project" >
+<img src="asset/4.png" alt="Project Screenshot" title="Screenshot of the project">
+
+
+
